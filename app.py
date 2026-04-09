@@ -43,4 +43,4 @@ if "preguntas" in st.session_state:
 
     if st.button("Evaluar"):
         resultado = ia(f"Evalúa: {respuestas}")
-        st.write(resultado) |
+        st.write(resultado)
