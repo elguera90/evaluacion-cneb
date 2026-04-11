@@ -3,7 +3,7 @@ import requests
 import docx2txt
 import fitz
 
-st.title("📚 Evaluación automática con IA")
+st.title("📚 Evaluación con IAG - EdTech • Ingeniería Educativa")
 
 API_KEY = st.secrets["OPENROUTER_API_KEY"]
 
