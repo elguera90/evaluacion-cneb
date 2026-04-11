@@ -145,7 +145,7 @@ Genera:
 
 Luego:
 
-4. 3 preguntas abiertas
+4. 10 preguntas abiertas
 5. Respuestas modelo
 6. Criterios de evaluación
 
