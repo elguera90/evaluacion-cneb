@@ -59,14 +59,14 @@ def preguntar_ia(prompt, system_prompt="Eres un experto pedagógico del MINEDU P
     
     # Usamos un modelo gratuito y rápido para evitar problemas de saldo en OpenRouter
     data = {
-        "model": "meta-llama/llama-3.3-70b-instruct:free", 
+        "model": "mistralai/mistral-7b-instruct:free", 
         "messages": [
             {"role": "system", "content": system_prompt}, 
             {"role": "user", "content": prompt}
         ], 
         "temperature": 0.2
     }
-    try:
+     try:
         response = requests.post(url, headers=headers, json=data, timeout=50)
         response.raise_for_status() 
         return response.json()['choices'][0]['message']['content']
