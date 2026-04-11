@@ -66,7 +66,8 @@ def preguntar_ia(prompt, system_prompt="Eres un experto pedagógico del MINEDU P
         ], 
         "temperature": 0.2
     }
-     try:
+    
+    try:
         response = requests.post(url, headers=headers, json=data, timeout=50)
         response.raise_for_status() 
         return response.json()['choices'][0]['message']['content']
