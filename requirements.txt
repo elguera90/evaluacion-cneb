@@ -4,3 +4,9 @@ docx2txt
 pymupdf
 gspread
 oauth2client
+gTTS
+gspread
+oauth2client
+PyMuPDF
+docx2txt
+requests
