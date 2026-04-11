@@ -59,7 +59,7 @@ def preguntar_ia(prompt, system_prompt="Eres un experto pedagógico del MINEDU P
     
     # Usamos un modelo gratuito y rápido para evitar problemas de saldo en OpenRouter
     data = {
-        "model": "mistralai/mistral-7b-instruct:free", 
+        "model": "cognitivecomputations/dolphin-mistral-24b-venice-edition:free", 
         "messages": [
             {"role": "system", "content": system_prompt}, 
             {"role": "user", "content": prompt}
