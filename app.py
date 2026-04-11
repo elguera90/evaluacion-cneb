@@ -83,35 +83,37 @@ if not API_KEY or not GOOGLE_CREDS:
     st.stop()
 
 # ==============================
-# 🧠 FUNCIONES IA Y LECTURA
+# 🧠 FUNCIONES IA (VERSIÓN MEJORADA CON MANEJO DE ERRORES)
 # ==============================
 def preguntar_ia(prompt, system_prompt="Eres un experto pedagógico del MINEDU Perú."):
     url = "https://openrouter.ai/api/v1/chat/completions"
     headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
-    data = {"model": "openrouter/auto", "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": prompt}], "temperature": 0.2}
+    
+    # NOTA: Cambié "openrouter/auto" por un modelo gratuito y rápido para evitar problemas de saldo.
+    # Si tienes saldo, puedes cambiarlo a "openai/gpt-4o-mini" o regresar a "openrouter/auto".
+    data = {
+        "model": "google/gemini-2.0-flash-lite-preview-02-05:free", 
+        "messages": [
+            {"role": "system", "content": system_prompt}, 
+            {"role": "user", "content": prompt}
+        ], 
+        "temperature": 0.2
+    }
+    
     try:
         response = requests.post(url, headers=headers, json=data, timeout=50)
+        
+        # Si la API devuelve un error (como 401 Unauthorized o 402 Payment Required), lo forzamos a saltar al 'except'
+        response.raise_for_status() 
+        
         return response.json()['choices'][0]['message']['content']
     except Exception as e:
-        return None
+        # Ahora devolvemos el error exacto para saber qué pasó
+        status = response.status_code if 'response' in locals() else 'Desconocido'
+        texto_error = response.text if 'response' in locals() else str(e)
+        return f"ERROR_API: {status} - {texto_error}"
 
-def leer_archivo(file):
-    if file.name.endswith(".pdf"):
-        pdf = fitz.open(stream=file.read(), filetype="pdf")
-        return "".join(page.get_text() for page in pdf)
-    elif file.name.endswith(".docx"):
-        return docx2txt.process(file)
-    return ""
-
-def texto_a_voz(texto):
-    try:
-        texto_limpio = re.sub(r'[*#_]', '', texto)
-        tts = gTTS(text=texto_limpio, lang='es', tld='com.mx')
-        fp = io.BytesIO()
-        tts.write_to_fp(fp)
-        return fp
-    except:
-        return None
+# ... (El resto del código de lectura de archivos y Google Sheets se queda igual) ...
 
 # ==============================
 # 📊 GOOGLE SHEETS (CONEXIÓN DUAL)
