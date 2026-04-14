@@ -1,11 +1,12 @@
 """
-services.py — Servicios de IA, voz, lectura de archivos y generación de PDF
+services.py — IA, voz, lectura de archivos y PDF
+Versión corregida: modelos gratuitos, errores visibles, prompt mejorado para sesiones
 """
 
 import streamlit as st
 import requests
 import docx2txt
-import fitz  # PyMuPDF
+import fitz
 import json
 import re
 import io
@@ -16,31 +17,22 @@ from config import get_api_key, MAX_CONTENT_CHARS, MAX_FILE_SIZE_MB
 
 logger = logging.getLogger(__name__)
 
-# ──────────────────────────────────────────────
-# CONSTANTES DE IA
-# ──────────────────────────────────────────────
-OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-MODEL_PRIMARIO  = "anthropic/claude-3-haiku"        # Estable y rápido
-MODEL_FALLBACK  = "qwen/qwen3-30b-a3b:free"         # Gratuito de respaldo
-TIMEOUT_SECONDS = 60
+OPENROUTER_URL  = "https://openrouter.ai/api/v1/chat/completions"
+MODEL_PRIMARIO  = "google/gemini-2.0-flash-exp:free"
+MODEL_FALLBACK  = "meta-llama/llama-3.3-70b-instruct:free"
+TIMEOUT_SECONDS = 90
 
 SYSTEM_PEDAGOGO = (
-    "Eres un experto pedagógico del MINEDU Perú especializado en el CNEB "
-    "(Currículo Nacional de Educación Básica). Tus respuestas son claras, "
-    "precisas, formativas y adaptadas al nivel del estudiante. "
-    "Siempre das retroalimentación constructiva."
+    "Eres un experto pedagógico del MINEDU Perú especializado en el CNEB. "
+    "Das retroalimentación clara, formativa y motivadora, adaptada al nivel del estudiante."
 )
 
 
 # ──────────────────────────────────────────────
-# SERVICIO IA — OpenRouter con fallback
+# NÚCLEO IA
 # ──────────────────────────────────────────────
 def preguntar_ia(prompt: str, system: str = SYSTEM_PEDAGOGO,
                  temperatura: float = 0.2, modelo: str = None) -> str | None:
-    """
-    Consulta al LLM vía OpenRouter.
-    Retorna el texto de respuesta o None en caso de error.
-    """
     headers = {
         "Authorization": f"Bearer {get_api_key()}",
         "Content-Type": "application/json",
@@ -48,149 +40,145 @@ def preguntar_ia(prompt: str, system: str = SYSTEM_PEDAGOGO,
         "X-Title": "IA CNEB MINEDU",
     }
     payload = {
-        "model": modelo or MODEL_PRIMARIO,
+        "model": MODEL_PRIMARIO,
         "messages": [
             {"role": "system", "content": system},
             {"role": "user",   "content": prompt},
         ],
         "temperature": temperatura,
-        "max_tokens": 1500,
+        "max_tokens": 2000,
     }
 
-    for modelo_intento in [modelo or MODEL_PRIMARIO, MODEL_FALLBACK]:
-        payload["model"] = modelo_intento
+    errores = []
+    for m in ([modelo] if modelo else [MODEL_PRIMARIO, MODEL_FALLBACK]):
+        payload["model"] = m
         try:
             resp = requests.post(OPENROUTER_URL, headers=headers,
                                  json=payload, timeout=TIMEOUT_SECONDS)
-            resp.raise_for_status()
-            data = resp.json()
-            contenido = data["choices"][0]["message"]["content"]
-            logger.info(f"IA respondió con modelo: {modelo_intento}")
-            return contenido
+            if resp.status_code == 200:
+                return resp.json()["choices"][0]["message"]["content"]
+            errores.append(f"{m} → HTTP {resp.status_code}: {resp.text[:150]}")
+            if resp.status_code not in (429, 503):
+                break
         except requests.exceptions.Timeout:
-            logger.warning(f"Timeout con {modelo_intento}")
-            continue
-        except requests.exceptions.HTTPError as e:
-            logger.error(f"HTTP {resp.status_code} con {modelo_intento}: {e}")
-            if resp.status_code == 429:   # Rate limit → intenta fallback
-                continue
-            return None
+            errores.append(f"{m} → Timeout tras {TIMEOUT_SECONDS}s")
         except Exception as e:
-            logger.error(f"Error inesperado IA: {e}")
-            return None
+            errores.append(f"{m} → {e}")
 
-    return None  # Ambos modelos fallaron
+    detalle = " | ".join(errores)
+    st.error(f"❌ La IA no respondió. Detalle: {detalle}")
+    st.info("💡 Verifica que **OPENROUTER_API_KEY** sea válida en Streamlit Secrets.")
+    return None
 
 
 # ──────────────────────────────────────────────
-# GENERACIÓN DE EXAMEN (JSON estructurado)
+# GENERAR PREGUNTAS desde sesión de aprendizaje
 # ──────────────────────────────────────────────
 def generar_preguntas(contenido: str, grado: str, idioma: str,
                       n_preguntas: int = 5) -> list | None:
     """
-    Genera preguntas de evaluación alineadas al CNEB en formato JSON.
-    Retorna lista de dicts o None si falla.
+    Lee la sesión de aprendizaje del docente (PDF/DOCX) y genera
+    preguntas alineadas al CNEB detectando automáticamente:
+    nivel, área, tema, competencias, capacidades y situación significativa.
     """
-    instruccion_idioma = ""
+    extra_idioma = ""
     if idioma == "Quechua":
-        instruccion_idioma = "Genera las preguntas en quechua sureño (Cusco-Collao). Incluye también la versión en español entre paréntesis."
+        extra_idioma = "Redacta las preguntas en quechua sureño con traducción al español entre paréntesis."
     elif idioma == "Aymara":
-        instruccion_idioma = "Genera las preguntas en aymara. Incluye también la versión en español entre paréntesis."
+        extra_idioma = "Redacta las preguntas en aymara con traducción al español entre paréntesis."
 
-    prompt = f"""
-Basado en el siguiente contenido curricular para {grado}:
+    prompt = f"""Eres un especialista pedagógico del MINEDU Perú.
+Analiza la siguiente SESIÓN DE APRENDIZAJE para {grado} y extrae:
+- Área curricular, tema, nivel/grado
+- Competencias y capacidades del CNEB involucradas
+- Situación significativa o contexto
 
+Luego genera EXACTAMENTE {n_preguntas} preguntas de evaluación que midan
+el logro de las competencias identificadas. {extra_idioma}
+
+SESIÓN DE APRENDIZAJE:
 ---
 {contenido[:MAX_CONTENT_CHARS]}
 ---
 
-{instruccion_idioma}
+Devuelve ÚNICAMENTE un array JSON sin texto extra ni bloques de código.
+Mezcla tipos: al menos 3 de opción múltiple y el resto abiertas.
 
-Genera exactamente {n_preguntas} preguntas de evaluación alineadas al CNEB.
-Devuelve ÚNICAMENTE un array JSON válido, sin texto adicional, sin comillas de código.
-
-Formato estricto:
+Formato JSON requerido:
 [
   {{
     "id": 1,
     "tipo": "opcion_multiple",
-    "pregunta": "Texto de la pregunta",
-    "opciones": ["Opción A", "Opción B", "Opción C", "Opción D"],
-    "respuesta_correcta": "Opción A",
-    "competencia": "Nombre de la competencia CNEB relacionada"
+    "pregunta": "Texto de la pregunta contextualizada",
+    "opciones": ["A) ...", "B) ...", "C) ...", "D) ..."],
+    "respuesta_correcta": "A) ...",
+    "competencia": "Nombre exacto de la competencia CNEB",
+    "capacidad": "Capacidad específica evaluada"
   }},
   {{
     "id": 2,
     "tipo": "abierta",
-    "pregunta": "Texto de la pregunta abierta",
-    "criterio": "Criterio de evaluación para el docente",
-    "competencia": "Nombre de la competencia CNEB relacionada"
+    "pregunta": "Pregunta que exige análisis o producción",
+    "criterio": "Qué se espera en una respuesta de nivel AD/A",
+    "competencia": "Nombre exacto de la competencia CNEB",
+    "capacidad": "Capacidad específica evaluada"
   }}
-]
+]"""
 
-Combina al menos 3 de opción múltiple y {n_preguntas - 3} abiertas.
-"""
-
-    respuesta = preguntar_ia(prompt, system="Eres un generador JSON estricto. Solo devuelves JSON puro.", temperatura=0.1)
+    respuesta = preguntar_ia(
+        prompt,
+        system="Eres un generador JSON estricto para MINEDU Perú. Devuelves SOLO el array JSON, sin explicaciones.",
+        temperatura=0.1
+    )
     if not respuesta:
         return None
 
     try:
-        # Limpia posibles restos de markdown
         limpio = re.sub(r"```(?:json)?|```", "", respuesta).strip()
+        # Extrae solo el array JSON si hay texto sobrante
+        match = re.search(r"\[[\s\S]*\]", limpio)
+        if match:
+            limpio = match.group(0)
         preguntas = json.loads(limpio)
         if isinstance(preguntas, list) and len(preguntas) > 0:
             return preguntas
+        st.warning("⚠️ La IA generó un JSON vacío. Intenta con un documento más detallado.")
     except json.JSONDecodeError as e:
-        logger.error(f"JSON inválido generado por IA: {e}\nRespuesta: {respuesta[:300]}")
+        st.error(f"❌ La IA no devolvió JSON válido: {e}")
+        st.code(respuesta[:400], language="text")
 
     return None
 
 
 # ──────────────────────────────────────────────
-# EVALUACIÓN DE RESPUESTAS
+# EVALUAR RESPUESTAS del estudiante
 # ──────────────────────────────────────────────
 def evaluar_examen(preguntas: list, respuestas: dict,
                    grado: str, idioma: str) -> dict | None:
-    """
-    Evalúa las respuestas de un estudiante.
-    Retorna dict con nivel_logro, retroalimentacion, sugerencias.
-    """
-    instruccion_idioma = ""
+    extra_idioma = ""
     if idioma == "Quechua":
-        instruccion_idioma = "Responde en quechua sureño con traducción en español."
+        extra_idioma = "Responde en quechua sureño con traducción al español."
     elif idioma == "Aymara":
-        instruccion_idioma = "Responde en aymara con traducción en español."
+        extra_idioma = "Responde en aymara con traducción al español."
 
-    data_eval = {
-        "grado": grado,
-        "preguntas": preguntas,
-        "respuestas_estudiante": respuestas,
-    }
+    prompt = f"""Evalúa las respuestas de un estudiante de {grado} según el CNEB. {extra_idioma}
 
-    prompt = f"""
-Evalúa el siguiente examen del CNEB para {grado}.
-{instruccion_idioma}
+PREGUNTAS Y RESPUESTAS:
+{json.dumps({"preguntas": preguntas, "respuestas": respuestas}, ensure_ascii=False, indent=2)}
 
-Datos: {json.dumps(data_eval, ensure_ascii=False)}
-
-Devuelve ÚNICAMENTE JSON con esta estructura:
+Devuelve SOLO este JSON (sin texto extra):
 {{
-  "nivel_logro": "AD|A|B|C",
+  "nivel_logro": "AD",
   "puntaje_estimado": 18,
-  "retroalimentacion": "Texto formativo y motivador de 3-4 oraciones.",
-  "fortalezas": ["fortaleza 1", "fortaleza 2"],
-  "sugerencias": ["sugerencia 1", "sugerencia 2"],
-  "competencias_logradas": ["competencia 1"],
-  "competencias_por_reforzar": ["competencia 2"]
+  "retroalimentacion": "Texto motivador de 3-4 oraciones dirigido al estudiante.",
+  "fortalezas": ["Logro específico 1", "Logro específico 2"],
+  "sugerencias": ["Acción concreta 1", "Acción concreta 2"],
+  "competencias_logradas": ["Competencia 1"],
+  "competencias_por_reforzar": ["Competencia 2"]
 }}
 
-Criterios MINEDU:
-- AD: Logro destacado (18-20)
-- A: Logro esperado (14-17)
-- B: En proceso (11-13)
-- C: En inicio (0-10)
-"""
+Escala MINEDU: AD=18-20 (Destacado), A=14-17 (Esperado), B=11-13 (En proceso), C=0-10 (En inicio).
+La retroalimentación debe ser cálida, específica y orientada a la mejora."""
 
     respuesta = preguntar_ia(prompt, temperatura=0.15)
     if not respuesta:
@@ -198,43 +186,36 @@ Criterios MINEDU:
 
     try:
         limpio = re.sub(r"```(?:json)?|```", "", respuesta).strip()
+        match = re.search(r"\{[\s\S]*\}", limpio)
+        if match:
+            limpio = match.group(0)
         resultado = json.loads(limpio)
-        # Validación mínima
         if "nivel_logro" not in resultado:
             resultado["nivel_logro"] = "C"
-        if "retroalimentacion" not in resultado:
-            resultado["retroalimentacion"] = respuesta
         return resultado
     except Exception:
         # Fallback: extrae nivel del texto libre
         nivel = "C"
         for n in ["AD", "A", "B"]:
-            if n in respuesta[:30]:
+            if n in respuesta[:40]:
                 nivel = n
                 break
-        return {"nivel_logro": nivel, "retroalimentacion": respuesta,
-                "fortalezas": [], "sugerencias": []}
+        return {
+            "nivel_logro": nivel,
+            "retroalimentacion": respuesta,
+            "fortalezas": [],
+            "sugerencias": [],
+        }
 
 
 # ──────────────────────────────────────────────
 # TEXTO A VOZ
 # ──────────────────────────────────────────────
 def texto_a_voz(texto: str, idioma_code: str = "es") -> io.BytesIO | None:
-    """
-    Convierte texto a audio MP3 con gTTS.
-    Para quechua/aymara usa español (no soportados por gTTS).
-    """
     try:
-        # Limpia markdown
-        limpio = re.sub(r"[*#_`>]", "", texto)
-        # Trunca si es muy largo (gTTS tiene límites)
-        limpio = limpio[:2000]
-
-        # gTTS no soporta qu/ay; se usa español como fallback
+        limpio = re.sub(r"[*#_`>\[\]{}]", "", texto)[:2000]
         lang = "es" if idioma_code in ("qu", "ay") else idioma_code
-        tld = "com.pe"  # Acento peruano
-
-        tts = gTTS(text=limpio, lang=lang, tld=tld, slow=False)
+        tts = gTTS(text=limpio, lang=lang, tld="com.pe", slow=False)
         fp = io.BytesIO()
         tts.write_to_fp(fp)
         fp.seek(0)
@@ -248,42 +229,33 @@ def texto_a_voz(texto: str, idioma_code: str = "es") -> io.BytesIO | None:
 # LECTURA DE ARCHIVOS
 # ──────────────────────────────────────────────
 def leer_archivo(file) -> str:
-    """
-    Extrae texto de PDF o DOCX.
-    Valida tamaño antes de procesar.
-    """
-    # Validar tamaño
     file.seek(0, 2)
     size_mb = file.tell() / (1024 * 1024)
     file.seek(0)
 
     if size_mb > MAX_FILE_SIZE_MB:
-        st.error(f"❌ El archivo supera el límite de {MAX_FILE_SIZE_MB} MB ({size_mb:.1f} MB).")
+        st.error(f"❌ Archivo demasiado grande: {size_mb:.1f} MB (máx. {MAX_FILE_SIZE_MB} MB)")
         return ""
 
     try:
-        if file.name.lower().endswith(".pdf"):
+        nombre = file.name.lower()
+        if nombre.endswith(".pdf"):
             pdf = fitz.open(stream=file.read(), filetype="pdf")
-            texto = " ".join(page.get_text() for page in pdf)
-            return texto[:MAX_CONTENT_CHARS * 2]  # Margen para truncar luego
-
-        elif file.name.lower().endswith(".docx"):
-            return docx2txt.process(file)[:MAX_CONTENT_CHARS * 2]
-
+            return " ".join(p.get_text() for p in pdf)
+        elif nombre.endswith(".docx"):
+            return docx2txt.process(file)
+        else:
+            st.error("❌ Formato no soportado. Usa PDF o DOCX.")
     except Exception as e:
-        st.error(f"❌ Error procesando el archivo: {e}")
+        st.error(f"❌ Error leyendo el archivo: {e}")
 
     return ""
 
 
 # ──────────────────────────────────────────────
-# GENERACIÓN DE REPORTE PDF
+# GENERAR PDF DE REPORTE
 # ──────────────────────────────────────────────
 def generar_reporte_pdf(resultados: list, titulo: str = "Reporte de Evaluaciones") -> io.BytesIO:
-    """
-    Genera un PDF con los resultados de evaluación usando reportlab.
-    Compatible con Streamlit download_button.
-    """
     try:
         from reportlab.lib.pagesizes import A4
         from reportlab.lib import colors
@@ -291,143 +263,93 @@ def generar_reporte_pdf(resultados: list, titulo: str = "Reporte de Evaluaciones
         from reportlab.lib.units import cm
         from reportlab.platypus import (SimpleDocTemplate, Paragraph, Spacer,
                                         Table, TableStyle, HRFlowable)
-        from reportlab.lib.enums import TA_CENTER, TA_LEFT
+        from reportlab.lib.enums import TA_CENTER
 
         buffer = io.BytesIO()
         doc = SimpleDocTemplate(buffer, pagesize=A4,
                                 leftMargin=2*cm, rightMargin=2*cm,
                                 topMargin=2.5*cm, bottomMargin=2*cm)
 
-        estilos = getSampleStyleSheet()
-        story = []
+        styles = getSampleStyleSheet()
+        titulo_s = ParagraphStyle("t", fontName="Helvetica-Bold", fontSize=15,
+                                  textColor=colors.HexColor("#C8102E"), alignment=TA_CENTER, spaceAfter=4)
+        sub_s    = ParagraphStyle("s", fontName="Helvetica", fontSize=8,
+                                  textColor=colors.HexColor("#9AA5B1"), alignment=TA_CENTER, spaceAfter=10)
+        enc_s    = ParagraphStyle("e", fontName="Helvetica-Bold", fontSize=10,
+                                  textColor=colors.HexColor("#4A5568"), spaceAfter=6, spaceBefore=12)
 
-        # ── Estilo personalizado ──
-        estilo_titulo = ParagraphStyle("titulo",
-            fontName="Helvetica-Bold", fontSize=16,
-            textColor=colors.HexColor("#C8102E"),
-            alignment=TA_CENTER, spaceAfter=4)
+        story = [
+            Paragraph("MINISTERIO DE EDUCACIÓN · PERÚ", sub_s),
+            Paragraph(titulo, titulo_s),
+            Paragraph(f"Generado: {datetime.now().strftime('%d/%m/%Y %H:%M')} · Total: {len(resultados)}", sub_s),
+            HRFlowable(width="100%", thickness=1.5, color=colors.HexColor("#C8102E"), spaceAfter=10),
+        ]
 
-        estilo_subtitulo = ParagraphStyle("sub",
-            fontName="Helvetica", fontSize=9,
-            textColor=colors.HexColor("#9AA5B1"),
-            alignment=TA_CENTER, spaceAfter=12)
-
-        estilo_normal = ParagraphStyle("normal",
-            fontName="Helvetica", fontSize=9,
-            textColor=colors.HexColor("#1A202C"),
-            leading=14)
-
-        estilo_encabezado = ParagraphStyle("enc",
-            fontName="Helvetica-Bold", fontSize=10,
-            textColor=colors.HexColor("#4A5568"),
-            spaceAfter=6, spaceBefore=12)
-
-        # ── Cabecera ──
-        story.append(Paragraph("MINISTERIO DE EDUCACIÓN · PERÚ", estilo_subtitulo))
-        story.append(Paragraph(titulo, estilo_titulo))
-        story.append(Paragraph(
-            f"Generado: {datetime.now().strftime('%d/%m/%Y %H:%M')} | "
-            f"Total registros: {len(resultados)}",
-            estilo_subtitulo
-        ))
-        story.append(HRFlowable(width="100%", thickness=1.5,
-                                color=colors.HexColor("#C8102E"),
-                                spaceAfter=12))
-
-        if not resultados:
-            story.append(Paragraph("No hay resultados para mostrar.", estilo_normal))
-        else:
-            # ── Tabla de resultados ──
-            story.append(Paragraph("Detalle por Estudiante", estilo_encabezado))
-
-            encabezados = ["Fecha", "Estudiante", "Grado", "Sección", "Nivel", "Idioma"]
-            filas = [encabezados]
-
-            colores_nivel = {
-                "AD": colors.HexColor("#1a9e6c"),
-                "A":  colors.HexColor("#2980B9"),
-                "B":  colors.HexColor("#F39C12"),
-                "C":  colors.HexColor("#C8102E"),
-            }
-
-            for r in resultados[:200]:  # Límite de filas por PDF
+        if resultados:
+            story.append(Paragraph("Detalle por Estudiante", enc_s))
+            filas = [["Fecha", "Estudiante", "Grado", "Sección", "Nivel", "Idioma"]]
+            for r in resultados[:200]:
                 filas.append([
                     str(r.get("Timestamp", ""))[:16],
-                    str(r.get("Nombre_Estudiante", ""))[:28],
+                    str(r.get("Nombre_Estudiante", ""))[:26],
                     str(r.get("Grado", "")),
                     str(r.get("Seccion", "")),
                     str(r.get("Nivel_Logro", "—")),
                     str(r.get("Idioma", "Español")),
                 ])
-
-            tabla = Table(filas, colWidths=[3*cm, 5.5*cm, 3.2*cm, 2.5*cm, 1.8*cm, 2.5*cm])
-            estilo_tabla = TableStyle([
-                ("BACKGROUND",   (0, 0), (-1, 0), colors.HexColor("#C8102E")),
-                ("TEXTCOLOR",    (0, 0), (-1, 0), colors.white),
-                ("FONTNAME",     (0, 0), (-1, 0), "Helvetica-Bold"),
-                ("FONTSIZE",     (0, 0), (-1, -1), 8),
-                ("ALIGN",        (0, 0), (-1, -1), "CENTER"),
-                ("VALIGN",       (0, 0), (-1, -1), "MIDDLE"),
-                ("ROWBACKGROUNDS", (0, 1), (-1, -1),
-                 [colors.HexColor("#F4F6F9"), colors.white]),
-                ("GRID",         (0, 0), (-1, -1), 0.3, colors.HexColor("#E8ECF0")),
-                ("TOPPADDING",   (0, 0), (-1, -1), 5),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-                ("ROUNDEDCORNERS", [4]),
-            ])
-            tabla.setStyle(estilo_tabla)
+            tabla = Table(filas, colWidths=[3*cm, 5.5*cm, 3*cm, 2.5*cm, 1.8*cm, 2.5*cm])
+            tabla.setStyle(TableStyle([
+                ("BACKGROUND",    (0,0), (-1,0), colors.HexColor("#C8102E")),
+                ("TEXTCOLOR",     (0,0), (-1,0), colors.white),
+                ("FONTNAME",      (0,0), (-1,0), "Helvetica-Bold"),
+                ("FONTSIZE",      (0,0), (-1,-1), 8),
+                ("ALIGN",         (0,0), (-1,-1), "CENTER"),
+                ("ROWBACKGROUNDS",(0,1), (-1,-1), [colors.HexColor("#F4F6F9"), colors.white]),
+                ("GRID",          (0,0), (-1,-1), 0.3, colors.HexColor("#E8ECF0")),
+                ("TOPPADDING",    (0,0), (-1,-1), 4),
+                ("BOTTOMPADDING", (0,0), (-1,-1), 4),
+            ]))
             story.append(tabla)
 
-            # ── Distribución por nivel ──
-            story.append(Spacer(1, 0.6*cm))
-            story.append(Paragraph("Distribución por Nivel de Logro", estilo_encabezado))
-
-            conteo = {}
-            for r in resultados:
-                n = r.get("Nivel_Logro", "C")
-                conteo[n] = conteo.get(n, 0) + 1
-
-            resumen_filas = [["Nivel", "Descripción", "Cantidad", "Porcentaje"]]
-            descripciones = {"AD": "Logro destacado", "A": "Logro esperado",
-                             "B": "En proceso", "C": "En inicio"}
+            # Distribución
+            story.append(Spacer(1, 0.5*cm))
+            story.append(Paragraph("Distribución por Nivel de Logro", enc_s))
+            niveles_list = [r.get("Nivel_Logro", "C") for r in resultados]
             total = len(resultados)
-            for nivel in ["AD", "A", "B", "C"]:
-                cant = conteo.get(nivel, 0)
-                pct = f"{cant/total*100:.1f}%" if total > 0 else "0%"
-                resumen_filas.append([nivel, descripciones.get(nivel, ""), str(cant), pct])
-
-            tabla_resumen = Table(resumen_filas, colWidths=[2*cm, 6*cm, 2.5*cm, 3*cm])
-            tabla_resumen.setStyle(TableStyle([
-                ("BACKGROUND",   (0, 0), (-1, 0), colors.HexColor("#4A5568")),
-                ("TEXTCOLOR",    (0, 0), (-1, 0), colors.white),
-                ("FONTNAME",     (0, 0), (-1, 0), "Helvetica-Bold"),
-                ("FONTSIZE",     (0, 0), (-1, -1), 9),
-                ("ALIGN",        (0, 0), (-1, -1), "CENTER"),
-                ("ROWBACKGROUNDS", (0, 1), (-1, -1),
-                 [colors.HexColor("#F4F6F9"), colors.white]),
-                ("GRID",         (0, 0), (-1, -1), 0.3, colors.HexColor("#E8ECF0")),
-                ("TOPPADDING",   (0, 0), (-1, -1), 5),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+            desc  = {"AD": "Logro destacado", "A": "Logro esperado",
+                     "B": "En proceso", "C": "En inicio"}
+            res_filas = [["Nivel", "Descripción", "Cantidad", "%"]]
+            for nv in ["AD", "A", "B", "C"]:
+                c = niveles_list.count(nv)
+                res_filas.append([nv, desc[nv], str(c),
+                                  f"{c/total*100:.1f}%" if total else "0%"])
+            t2 = Table(res_filas, colWidths=[2*cm, 6*cm, 2.5*cm, 2.5*cm])
+            t2.setStyle(TableStyle([
+                ("BACKGROUND",    (0,0), (-1,0), colors.HexColor("#4A5568")),
+                ("TEXTCOLOR",     (0,0), (-1,0), colors.white),
+                ("FONTNAME",      (0,0), (-1,0), "Helvetica-Bold"),
+                ("FONTSIZE",      (0,0), (-1,-1), 9),
+                ("ALIGN",         (0,0), (-1,-1), "CENTER"),
+                ("ROWBACKGROUNDS",(0,1), (-1,-1), [colors.HexColor("#F4F6F9"), colors.white]),
+                ("GRID",          (0,0), (-1,-1), 0.3, colors.HexColor("#E8ECF0")),
+                ("TOPPADDING",    (0,0), (-1,-1), 4),
+                ("BOTTOMPADDING", (0,0), (-1,-1), 4),
             ]))
-            story.append(tabla_resumen)
+            story.append(t2)
 
-        # ── Pie de página ──
-        story.append(Spacer(1, 0.8*cm))
-        story.append(HRFlowable(width="100%", thickness=0.5,
-                                color=colors.HexColor("#E8ECF0"), spaceAfter=6))
-        story.append(Paragraph(
-            "Sistema IA CNEB v2.0 · Ministerio de Educación · Perú · www.minedu.gob.pe",
-            estilo_subtitulo
-        ))
+        story += [
+            Spacer(1, 0.6*cm),
+            HRFlowable(width="100%", thickness=0.5, color=colors.HexColor("#E8ECF0"), spaceAfter=4),
+            Paragraph("Sistema IA CNEB v2.0 · Ministerio de Educación · Perú · www.minedu.gob.pe", sub_s),
+        ]
 
         doc.build(story)
         buffer.seek(0)
         return buffer
 
     except ImportError:
-        # reportlab no instalado
-        st.error("❌ reportlab no está instalado. Agrega `reportlab` a requirements.txt")
+        st.error("❌ Falta instalar reportlab. Agrégalo a requirements.txt")
         return io.BytesIO()
     except Exception as e:
-        logger.error(f"Error generando PDF: {e}")
+        logger.error(f"Error PDF: {e}")
         return io.BytesIO()
