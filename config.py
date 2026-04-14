@@ -284,6 +284,11 @@ hr { border-color: var(--minedu-gris-1) !important; margin: 1.5rem 0 !important;
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: var(--minedu-gris-1); }
 ::-webkit-scrollbar-thumb { background: var(--minedu-rojo); border-radius: 999px; }
+/* Fix labels en modo claro */
+label, .stTextInput label, .stTextArea label,
+[data-testid="stWidgetLabel"] {
+    color: #1A202C !important;
+}
 </style>
 """
 
