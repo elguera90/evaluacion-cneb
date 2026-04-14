@@ -18,8 +18,8 @@ from config import get_api_key, MAX_CONTENT_CHARS, MAX_FILE_SIZE_MB
 logger = logging.getLogger(__name__)
 
 OPENROUTER_URL  = "https://openrouter.ai/api/v1/chat/completions"
-MODEL_PRIMARIO  = "google/gemini-2.0-flash-exp:free"
-MODEL_FALLBACK  = "meta-llama/llama-3.3-70b-instruct:free"
+MODEL_PRIMARIO  = "openrouter/free"
+MODEL_FALLBACK  = "qwen/qwen3-next-80b-a3b-instruct:f
 TIMEOUT_SECONDS = 90
 
 SYSTEM_PEDAGOGO = (
