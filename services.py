@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 OPENROUTER_URL  = "https://openrouter.ai/api/v1/chat/completions"
 MODEL_PRIMARIO  = "openrouter/free"
-MODEL_FALLBACK  = "qwen/qwen3-next-80b-a3b-instruct:f
+MODEL_FALLBACK  = "qwen/qwen3-next-80b-a3b-instruct:free"
 TIMEOUT_SECONDS = 90
 
 SYSTEM_PEDAGOGO = (
