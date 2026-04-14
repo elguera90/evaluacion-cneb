@@ -157,7 +157,9 @@ def registrar_resultado(datos: dict) -> bool:
         _retry(_op)
         return True
     except Exception as e:
-        logger.error(f"registrar_resultado: {e}")
+        import streamlit as st
+        st.error(f"❌ Detalle del error Google Sheets: {type(e).__name__}: {e}")
+        logger.error(f"guardar_examen: {e}")
         return False
 
 
