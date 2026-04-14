@@ -229,6 +229,36 @@ h2, h3 {
     box-shadow: 0 0 0 3px rgba(200,16,46,0.1) !important;
 }
 
+/* ── Fix: color de texto en inputs (evita texto blanco invisible) ── */
+.stTextInput > div > div > input,
+.stTextArea > div > div > textarea {
+    color: #1A202C !important;
+}
+
+/* ── Fix: labels visibles en todo el formulario ── */
+label,
+.stTextInput label,
+.stTextArea label,
+.stSelectbox label,
+.stSlider label,
+.stFileUploader label,
+[data-testid="stWidgetLabel"] p,
+[data-testid="stWidgetLabel"] {
+    color: #1A202C !important;
+    font-weight: 500 !important;
+}
+
+/* ── Fix: ocultar toolbar de Streamlit ── */
+[data-testid="stToolbar"],
+#MainMenu,
+footer { display: none !important; }
+
+/* ── Fix: selectbox texto visible ── */
+[data-baseweb="select"] span,
+[data-baseweb="select"] div {
+    color: #1A202C !important;
+}
+
 /* ── Alertas personalizadas ── */
 .alert-success {
     background: rgba(46,204,113,0.1);
@@ -284,11 +314,6 @@ hr { border-color: var(--minedu-gris-1) !important; margin: 1.5rem 0 !important;
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: var(--minedu-gris-1); }
 ::-webkit-scrollbar-thumb { background: var(--minedu-rojo); border-radius: 999px; }
-/* Fix labels en modo claro */
-label, .stTextInput label, .stTextArea label,
-[data-testid="stWidgetLabel"] {
-    color: #1A202C !important;
-}
 </style>
 """
 
