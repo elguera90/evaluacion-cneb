@@ -1,8 +1,13 @@
+# ──────────────────────────────────────────────
+# requirements.txt — IA CNEB MINEDU v2.0
+# Probado con Python 3.11
+# ──────────────────────────────────────────────
+
 streamlit>=1.35.0
 requests>=2.31.0
 gspread>=6.0.0
 oauth2client>=4.1.3
-PyMuPDF>=1.23.0
+pymupdf>=1.23.0
 docx2txt>=0.8
 gtts>=2.5.1
 reportlab>=4.2.0
