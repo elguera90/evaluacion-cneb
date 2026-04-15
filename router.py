@@ -37,11 +37,14 @@ def _sidebar_docente():
         st.markdown("""
         <div style="text-align:center; padding: 1rem 0 0.5rem;">
             <div style="font-size:2.5rem;">🎓</div>
-            <div style="font-size:1rem; font-weight:700; color:white; letter-spacing:0.02em;">
-                IA CNEB
+            <div style="font-size:0.82rem; font-weight:800; color:white; letter-spacing:0.01em; line-height:1.3; margin-top:0.3rem;">
+                Sistema de Retroalimentación<br>con IA Generativa
             </div>
-            <div style="font-size:0.75rem; color:rgba(255,255,255,0.7);">
-                MINEDU Perú · v2.0
+            <div style="font-size:0.72rem; color:rgba(255,255,255,0.8); margin-top:0.2rem; font-weight:500;">
+                Aula de Innovación Pedagógica
+            </div>
+            <div style="font-size:0.68rem; color:rgba(255,255,255,0.6); margin-top:0.1rem;">
+                MINEDU · Perú
             </div>
         </div>
         """, unsafe_allow_html=True)
@@ -355,7 +358,7 @@ def render_estudiante(examen_id: str):
     # ── Cabecera estudiante ──
     _header_institucional(
         f"📝 Evaluación · {grado}",
-        f"Sistema IA CNEB · MINEDU Perú · Idioma: {idioma}",
+        f"Sistema Sistema de Retroalimentación con IA Generativa · Idioma: {idioma}",
         modo="estudiante"
     )
 
@@ -512,10 +515,11 @@ def _header_institucional(titulo: str, subtitulo: str, modo: str = "docente"):
             <div style="font-size:1.3rem; font-weight:700; color:#1A202C;">{titulo}</div>
             <div style="font-size:0.82rem; color:#9AA5B1;">{subtitulo}</div>
         </div>
-        <div style="margin-left:auto; text-align:right;">
+        <div style="margin-left:auto; text-align:right; line-height:1.5;">
             <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/c/cf/Flag_of_Peru.svg/24px-Flag_of_Peru.svg.png"
-                 style="height:18px; vertical-align:middle; margin-right:4px;"/>
-            <span style="font-size:0.75rem; color:#9AA5B1;">MINEDU · Perú</span>
+                 style="height:16px; vertical-align:middle; margin-right:4px;"/>
+            <span style="font-size:0.75rem; color:#9AA5B1; font-weight:600;">MINEDU · Perú</span><br>
+            <span style="font-size:0.65rem; color:#C8102E; font-weight:700;">© EdTech · Ingeniería Educativa</span>
         </div>
     </div>
     """, unsafe_allow_html=True)
